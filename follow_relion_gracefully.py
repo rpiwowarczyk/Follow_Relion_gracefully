@@ -806,7 +806,8 @@ def plot_motioncorr_stats_streamlit(star_path):
 
     selected_mic = mics[mic_idx]
     
-    show_motion(FOLDER, selected_mic)
+    if st.checkbox('Show motion model?'):
+        show_motion(FOLDER, selected_mic)
     
     if st.checkbox('Show corrected micrographs?'):
         gaussian_blur_stdev = st.slider("Gaussian blur sdev", 0.0, 5.0, 0.1)
@@ -1224,6 +1225,8 @@ def process_extract_streamlit(node_files, folder):
 def show_random_particles_streamlit(star_path, project_path, adj_contrast=False):
     star = parse_star(star_path)["particles"]  # Ensure parse_star is defined
     data_shape = star.shape[0]
+    
+    st.write(f'**Extracted {data_shape} particles**')
 
     num_images, image_width, adj_contrast, r = get_user_inputs()
 
@@ -2009,9 +2012,6 @@ def plot_micrograph(micrograph, coords_x, coords_y, img_resize_fac):
     st.pyplot(fig, bbox_inches="tight")
 
 
-    
-    
-
 def get_note(path_):
     if os.path.exists(path_):
         file = open(path_)
@@ -2069,17 +2069,20 @@ def plot_cls3d_stats_streamlit(rln_folder, job_name, nodes):
     model_files.sort(key=os.path.getmtime)
     n_inter = len(model_files)
 
+
     if n_inter != 0:
         class_paths, n_classes_, iter_, class_dist_, class_res_, fsc_res, fsc = get_classes(
             path_data, model_files
         )
+        
+        volumes = [mrcfile.mmap(os.path.join(rln_folder, cls_path)).data for cls_path in class_paths]
 
         # Display combined classes
         st.write(f"Combined Classes: found {len(class_paths)}")
-        plot_combined_classes_streamlit(class_paths, class_dist_[:, -1])
+        plot_combined_classes_streamlit(volumes, class_dist_[:, -1])
 
         # Display class projections
-        plot_projections_streamlit(class_paths, class_dist_)
+        plot_projections_streamlit(volumes, class_dist_)
 
         # Display class distribution
         if n_classes_ > 1:
@@ -2100,7 +2103,7 @@ def plot_cls3d_stats_streamlit(rln_folder, job_name, nodes):
                     mode="lines",
                     name='GoldStandardFsc',
                     customdata=fsc_x,
-                    hovertemplate=f"Resolution: %{{customdata:.2f}}<br>FSC: %{{y:.2f}}{'%'}<extra></extra>",
+                    hovertemplate=f"Resolution: %{{customdata:.2f}}<br>FSC: %{{y:.2f}}<extra></extra>",
                 )
             )
             fig.update_layout(hovermode="x unified")
@@ -2197,134 +2200,77 @@ def normalize_array(array):
     normalized_array = (array - min_value) / (max_value - min_value)
     return normalized_array
 
+def process_projection(volume, axis, project_map, max_size=None):
+        projection = np.max(volume, axis=axis) if project_map else np.mean(volume, axis=axis)
+        projection = normalize_array(projection)  # Assuming normalize_array handles exceptions internally
+        if max_size:
+            padding = ((0, 0), (0, max_size - projection.shape[1]))
+            projection = np.pad(projection, padding)
+        return projection
 
-def plot_3dclasses(files, conc_axis=0):
-    class_averages = []
-
-    if len(files) == 1:
+def plot_3dclasses(volumes, conc_axis=0, key=''):
+    
+    if len(volumes) == 1:
         conc_axis = 1
 
-    for n, class_ in enumerate(files):
-        with mrcfile.mmap(class_) as mrc_stack:
-            mrcs_file = mrc_stack.data
-            z, x, y = mrc_stack.data.shape
+    project_map = st.checkbox('Maximum projection?', key=key)
+    class_averages = []
+    max_sizes = []
 
-            average_top = np.mean(mrcs_file, axis=0)
-            try:
-                average_top = normalize_array(average_top)
-            except:
-                pass
+    for volume in volumes:
+        projections = [process_projection(volume, axis, project_map) for axis in range(3)]
+        max_size = max(proj.shape[1] for proj in projections)
+        max_sizes.append(max_size)
 
-            average_front = np.mean(mrcs_file, axis=1)
-
-            try:
-                average_front = normalize_array(average_front)
-
-            except:
-                pass
-
-            average_side = np.mean(mrcs_file, axis=2)
-
-            try:
-                average_side = normalize_array(average_side)
-            except:
-                pass
-
-            # join 3 views together if joined in 3D classification or Ab Initio, otherwise return projections (for mask)
-            if conc_axis == 0:
-                try:
-                    average_class = np.concatenate(
-                        (average_top, average_front, average_side), conc_axis
-                    )
-
-                except ValueError:
-                    max_size = max(
-                        average_top.shape[1],
-                        average_front.shape[1],
-                        average_side.shape[1],
-                    )
-
-                    padded_top = np.pad(
-                        average_top, ((0, 0), (0, max_size - average_top.shape[1]))
-                    )
-                    padded_front = np.pad(
-                        average_front, ((0, 0), (0, max_size - average_front.shape[1]))
-                    )
-                    padded_side = np.pad(
-                        average_side, ((0, 0), (0, max_size - average_side.shape[1]))
-                    )
-
-                    average_class = np.concatenate(
-                        (padded_top, padded_front, padded_side), conc_axis
-                    )
-
-                class_averages.append(average_class)
-            else:
-                class_averages = [average_top, average_front, average_side]
+        if conc_axis == 0:
+            class_averages.append(np.concatenate([process_projection(volume, axis, project_map, max_size) for axis in range(3)], axis=conc_axis))
+        else:
+            class_averages.extend(projections)
 
     try:
         if conc_axis == 0:
-            final_average = np.concatenate(class_averages, axis=1)
+            max_final_size = max(max_sizes)
+            final_average = np.concatenate([np.pad(cls_avg, ((0, 0), (0, max_final_size - cls_avg.shape[1]))) for cls_avg in class_averages], axis=1)
         else:
             final_average = class_averages
-
     except ValueError:
         final_average = []
 
     return final_average
 
 
-def plot_projections_streamlit(class_paths, class_dist_=None, string="Class", cmap="gray"):
-    if class_paths is not None and len(class_paths) > 1:
-        projections = plot_3dclasses(class_paths)  # Ensure plot_3dclasses is defined
-
-        fig, ax = plt.subplots(figsize=(12, 8))
-        ax.imshow(projections, cmap=cmap)
-        ax.grid(False)
-
+def plot_projections_streamlit(volumes, class_dist_=None, string="Class", cmap="gray", key=''):
+    
+    def set_axis_labels(ax, labels_x, labels_y, projections, volumes):
         # Set X-axis ticks and labels
-        labels_positions_x = (
-            np.linspace(
-                1 / len(class_paths) * projections.shape[1],
-                projections.shape[1],
-                len(class_paths),
-            )
-            - 0.5 * 1 / len(class_paths) * projections.shape[1]
-        )
-        labels_x = [f"{string} {x+1}" for x in range(len(class_paths))]
-
-        if class_dist_ is not None:
-            class_dist_ = np.array(class_dist_)
-            try:
-                labels_x = [
-                    f"{string} {x+1} ({round(float(class_dist_[:, -1][x]) * 100, 2)}%)"
-                    for x in range(len(class_paths))
-                ]
-            except:
-                labels_x = [
-                    f"{string} {x+1} ({round(float(class_dist_[x]) * 100, 2)}%)"
-                    for x in range(len(class_paths))
-                ]
-
+        labels_positions_x = np.linspace(0, projections.shape[1], len(volumes) + 1)[1:] - 0.5 * projections.shape[1] / len(volumes)
         ax.set_xticks(labels_positions_x)
         ax.set_xticklabels(labels_x)
         ax.xaxis.tick_top()
 
         # Set Y-axis ticks and labels
-        labels_positions_y = (
-            np.linspace(1 / 3 * projections.shape[0], projections.shape[0], 3)
-            - 0.5 * 1 / 3 * projections.shape[0]
-        )
+        labels_positions_y = np.linspace(0, projections.shape[0], 4)[1:] - 0.5 * projections.shape[0] / 3
         ax.set_yticks(labels_positions_y)
-        ax.set_yticklabels(["Z", "X", "Y"], fontweight="bold")
+        ax.set_yticklabels(labels_y, fontweight="bold")
 
+    if volumes is not None and len(volumes) > 1:
+        projections = plot_3dclasses(volumes, key=key)
+        fig, ax = plt.subplots(figsize=(12, 8))
+        ax.imshow(projections, cmap=cmap)
+        ax.grid(False)
+
+        labels_x = [f"{string} {x+1}" for x in range(len(volumes))]
+        if class_dist_ is not None:
+            try:
+                labels_x = [f"{string} {x+1} ({round(float(dist) * 100, 2)}%)" for x, dist in enumerate(np.array(class_dist_)[:, -1])]
+            except IndexError:
+                labels_x = [f"{string} {x+1} ({round(float(dist) * 100, 2)}%)" for x, dist in enumerate(class_dist_)]
+
+        set_axis_labels(ax, labels_x, ["Z", "X", "Y"], projections, volumes)
         st.pyplot(fig)
 
     else:
-        projections = plot_3dclasses(
-            class_paths, conc_axis=1
-        )  # Ensure plot_3dclasses is defined
-
+        projections = plot_3dclasses(volumes, conc_axis=1)
         fig, axes = plt.subplots(1, 3, figsize=(12, 4))
         projection_titles = ["Z Projection", "X Projection", "Y Projection"]
 
@@ -2335,6 +2281,7 @@ def plot_projections_streamlit(class_paths, class_dist_=None, string="Class", cm
             ax.set_yticks([])
 
         st.pyplot(fig)
+
 
 
 def resize_3d(volume_, new_size=100):
@@ -2444,7 +2391,8 @@ def plot_volume(volume, threshold, max_size=150):
     return fig_volume
 
 
-def plot_combined_classes_streamlit(class_paths, class_dist):
+def plot_combined_classes_streamlit(volumes, class_dist):
+    
     col1, col2 = st.columns(2)
     with col1:
         threshold = st.slider(
@@ -2468,7 +2416,7 @@ def plot_combined_classes_streamlit(class_paths, class_dist):
     if map_resize > 150:
         st.warning("Larger maps can be very slow!")
 
-    num_classes = len(class_paths)
+    num_classes = len(volumes)
     cols = min(n_columns, num_classes)
     rows = math.ceil(num_classes / n_columns)
     fig = make_subplots(rows=rows, cols=cols, specs=[[{"type": "scene"}] * cols] * rows)
@@ -2477,19 +2425,16 @@ def plot_combined_classes_streamlit(class_paths, class_dist):
     annotations = []
     aspect_ratio = dict(x=1, y=1, z=1)
 
-    for n, cls_path in enumerate(class_paths):
-        with mrcfile.open(cls_path, permissive=True) as mrc:
-            mrc_cls_data = mrc.data
-            fig_ = plot_volume(mrc_cls_data, threshold, max_size=map_resize)
-
+    if st.checkbox('Show class volumes?'):
+        for n, volume in enumerate(volumes):
+            fig_ = plot_volume(volume, threshold, max_size=map_resize)
+            
             if fig_ is not None:
                 row, col = divmod(n, cols)
                 fig.add_trace(fig_["data"][0], row=row + 1, col=col + 1)
-
                 # Calculate the position for the annotation based on row and column
                 x = (col + 0.5) / cols
                 y = 1 - (row / rows) - 0.05
-
                 cls_dist = round(float(class_dist[n]) * 100, 2)
                 # Add annotation for the class number
                 annotations.append(
@@ -2506,29 +2451,29 @@ def plot_combined_classes_streamlit(class_paths, class_dist):
                     )
                 )
 
-    # Update layout with annotations
-    fig.update_layout(
-        hovermode=False,
-        annotations=annotations,
-        height=rows * row_height,
-        margin=dict(l=0, r=0, t=0, b=0),
-    )
-
-    # Update layout for each subplot
-    for n in range(num_classes):
+        # Update layout with annotations
         fig.update_layout(
-            **{
-                f"scene{n + 1}": dict(
-                    xaxis=dict(visible=False),
-                    yaxis=dict(visible=False),
-                    zaxis=dict(visible=False),
-                    camera=dict(eye=dict(x=3, y=3, z=3)),
-                )
-            }
+            hovermode=False,
+            annotations=annotations,
+            height=rows * row_height,
+            margin=dict(l=0, r=0, t=0, b=0),
         )
 
-    # Display in Streamlit
-    st.plotly_chart(fig, use_container_width=True)
+        # Update layout for each subplot
+        for n in range(num_classes):
+            fig.update_layout(
+                **{
+                    f"scene{n + 1}": dict(
+                        xaxis=dict(visible=False),
+                        yaxis=dict(visible=False),
+                        zaxis=dict(visible=False),
+                        camera=dict(eye=dict(x=3, y=3, z=3)),
+                    )
+                }
+            )
+
+        # Display in Streamlit
+        st.plotly_chart(fig, use_container_width=True)
 
 
 def plot_class_distribution_streamlit(class_dist_, PLOT_HEIGHT=500):
@@ -2575,7 +2520,7 @@ def plot_class_resolution_streamlit(class_res_, PLOT_HEIGHT=500):
     fig.update_yaxes(title_text="Class Resolution [A]")
 
     fig.update_layout(title="Class Resolution [A]")
-    fig.update_layout(hovermode="x unified")
+    fig.update_layout(hovermode="x unified", height=500)
 
     st.plotly_chart(fig, use_container_width=True, height=PLOT_HEIGHT)
 
@@ -2633,8 +2578,8 @@ def plot_angular_distribution_streamlit(psi, rot, tilt, cls_data):
 
 def plot_mask_streamlit(mask_path):
     # path_data = os.path.join(rln_folder, job_name)
-    mask_projections = plot_3dclasses([mask_path], conc_axis=1)
-    shortcodes = []
+    mask_data = mrcfile.mmap(mask_path).data
+    mask_projections = plot_3dclasses([mask_data], conc_axis=1)
 
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
 
@@ -2651,7 +2596,7 @@ def plot_mask_streamlit(mask_path):
 
     view_volume = st.checkbox("View mask?")
     if view_volume:
-        st.plotly_chart(plot_volume(mrcfile.mmap(mask_path).data, 0.5))
+        st.plotly_chart(plot_volume(mask_data, 0.5))
 
     print(f'{datetime.now()}: plot_mask_streamlit done')
     
@@ -2807,26 +2752,16 @@ def plot_ctf_refine_streamlit(node_files, FOLDER, job_name):
             # If CtfRefine is used as in tutorial, then 3 runs are done. The last one should have Refine3D path
             if "CtfRefine" in refine_path:
                 refine_path = refine_path.split("/")
-
-                # search another job
                 note = get_note(
                     os.path.join(FOLDER, refine_path[0], refine_path[1], "note.txt")
                 )
 
                 refine_path = re.search(r"--i\s([\w\d/]+\.star)", note).group(1)
 
-                if "CtfRefine" in refine_path:
-                    refine_path = refine_path.split("/")
-                    note = get_note(
-                        os.path.join(FOLDER, refine_path[0], refine_path[1], "note.txt")
-                    )
-
-                    refine_path = re.search(r"--i\s([\w\d/]+\.star)", note).group(1)
-
-                    if "Refine3D" in refine_path:
-                        refine_path = refine_path
-                else:
-                    refine_path = ""
+                if "Refine3D" in refine_path:
+                    refine_path = refine_path
+            else:
+                refine_path = ""
 
         except Exception as e:
             refine_path = ""
@@ -2880,6 +2815,39 @@ def plot_ctf_refine_streamlit(node_files, FOLDER, job_name):
             )
             fig.update_layout(title="CTF Refine Changes", showlegend=False)
             st.plotly_chart(fig)
+
+        if st.checkbox('Show per micrograph particles?'):
+            names_coordinates = ctf_refine_data[['_rlnMicrographName', '_rlnDefocusU', '_rlnCoordinateX', '_rlnCoordinateY']]
+            unique_mics = np.unique(names_coordinates['_rlnMicrographName'])
+            idx = st.slider('Micrograph index', 0, unique_mics.shape[0]-1, 0)
+            selected_mic = unique_mics[idx]
+            selected_particles = names_coordinates[names_coordinates['_rlnMicrographName'] == selected_mic]
+            
+            # change Z axis label to Defocus
+            fig = go.Figure(data=[go.Scatter3d(
+                x=selected_particles['_rlnCoordinateX'].astype(float),
+                y=selected_particles['_rlnCoordinateY'].astype(float),
+                z=selected_particles['_rlnDefocusU'].astype(float),
+                mode='markers',
+                marker=dict(
+                    size=10,
+                    color=selected_particles['_rlnDefocusU'].astype(float),                # set color to an array/list of desired values
+                    colorscale='Viridis',   # choose a colorscale
+                    opacity=0.8
+                )
+            )])
+            fig.update_layout(margin=dict(l=0, r=0, t=0, b=0))
+            fig.update_layout(scene = dict(
+                    xaxis_title='X axis (px)',
+                    yaxis_title='Y axis (px)',
+                    zaxis_title='Defocus (Å)'),
+                    width=700,
+                    margin=dict(r=20, b=10, l=10, t=10))
+            st.plotly_chart(fig)
+            
+        if st.checkbox("Show statistics?"):
+                interactive_scatter_plot(os.path.join(FOLDER, node_files[1]))
+            
     else:
         param_names = [os.path.basename(file).replace(".mrc", "") for file in ctf_data]
         ctf_images = [mrcfile.open(img).data for img in ctf_data]
@@ -3018,6 +2986,9 @@ def plot_polish_streamlit(node_files, FOLDER, job_name):
 
             st.plotly_chart(fig, use_container_width=True)
 
+            if st.checkbox("Show random shiny particles?"):
+                show_random_particles_streamlit(os.path.join(FOLDER, node_files[1]), FOLDER)
+            
         except Exception as e:
             st.error(f"Error loading B-factors data: {e}")
 
@@ -3849,8 +3820,11 @@ def plot_pseudosubtomo_streamlit(rlnFOLDER, node_files, job_name):
         ctf_paths = [os.path.join(rlnFOLDER, name)
                      for name in pseudotomo_ctf_names]
 
-        plot_projections_streamlit(data_paths, class_dist_=None, string="Class", cmap="gray")
-        plot_projections_streamlit(ctf_paths, class_dist_=None, string="Class", cmap="gray")
+        volumes_particles = [mrcfile.mmap(data_path).data for data_path in data_paths]
+        volumes_ctf = [mrcfile.mmap(ctf_path).data for ctf_path in ctf_paths]
+
+        plot_projections_streamlit(volumes_particles, class_dist_=None, string="Class", cmap="gray", key='subvolumes')
+        plot_projections_streamlit(volumes_ctf, class_dist_=None, string="Class", cmap="gray", key='ctf')
         
         interactive_scatter_plot(particles_path)
     
