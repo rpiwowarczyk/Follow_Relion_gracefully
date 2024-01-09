@@ -1782,7 +1782,7 @@ def plot_picks_streamlit(rln_folder, job_name, img_resize_fac=0.2):
             float
         )
         fom_slider = st.slider(
-            "FOM limit", 0.0, max(pick_stats), [0.0, max(pick_stats)]
+            "FOM limit", min(pick_stats), max(pick_stats), [min(pick_stats), max(pick_stats)]
         )
 
         coords_df = pd.DataFrame()
