@@ -99,6 +99,7 @@ import subprocess
 import shlex
 import signal
 from typing import List
+import traceback
 
 
 def parse_star(file_path):
@@ -221,10 +222,18 @@ def execute_job(selected_job, folder, node_files):
 # Streamlit app layout
 def display_job_info(selected_job, FOLDER, pipeline_processes, pipeline_star):
     process_nodes = pipeline_star["pipeline_nodes"]["_rlnPipeLineNodeName"]
+    process_alias = pipeline_processes["_rlnPipeLineProcessAlias"]
+    
+    alias = process_alias[pipeline_processes["_rlnPipeLineProcessName"] == selected_job].values[0]
+    
+    
     job_path = os.path.join(FOLDER, selected_job)
 
     col1, col2 = st.columns(2)
     st.title(selected_job)
+    if alias != 'None':
+        st.write(f'**Alias: _{alias}_**')
+    
     st.divider()
 
     # Get status and icon
@@ -250,6 +259,7 @@ def display_job_info(selected_job, FOLDER, pipeline_processes, pipeline_star):
     children = job_relation[job_relation["Job"] == selected_job]["Children"].values
     parents = job_relation[job_relation["Job"] == selected_job]["Parents"].values
 
+    
     # Check if children/parents are not empty and are iterable
     children_text = (
         ", ".join(children[0])
@@ -322,8 +332,9 @@ def display_job_info(selected_job, FOLDER, pipeline_processes, pipeline_star):
                             file_path, f"Download {file_name}", file_name
                         )
                         buttons_done.add(file_name)
-                    except Exception as e:
-                        print(e)
+                    except Exception:
+                        error_info = traceback.format_exc()
+                        print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
 
                     if "half" in node:
                         half2_node = node.replace("half1", "half2")
@@ -337,8 +348,9 @@ def display_job_info(selected_job, FOLDER, pipeline_processes, pipeline_star):
                                     half2_file_name,
                                 )
                                 buttons_done.add(half2_file_name)
-                            except Exception as e:
-                                print(e)
+                            except Exception:
+                                error_info = traceback.format_exc()
+                                print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
 
     st.divider()
 
@@ -574,8 +586,9 @@ def get_file_mod_time(file, rln_folder):
     if os.path.exists(file_path):
         try:
             return datetime.fromtimestamp(os.path.getmtime(file_path))
-        except Exception as e:
-            print(e)
+        except Exception:
+            error_info = traceback.format_exc()
+            print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
             return None
     else:
         return None
@@ -621,8 +634,9 @@ def plot_import_streamlit(rln_folder, node_files):
                         file_mod_times.append(
                             datetime.fromtimestamp(os.path.getmtime(file_path))
                         )
-                    except Exception as e:
-                        print(e)
+                    except Exception:
+                        error_info = traceback.format_exc()
+                        print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
                 else:
                     pass
 
@@ -664,7 +678,7 @@ def plot_import_streamlit(rln_folder, node_files):
         # tomo particles import
         if "_rlnCoordinateZ" in star_data.columns:
             unique_mics = np.unique(star_data["_rlnTomoName"])
-            file_idx = st.slider("Tomogram index", 0, len(unique_mics), 0)
+            file_idx = st.slider("Tomogram index", 0, len(unique_mics)-1, 0)
 
             file = os.path.join(FOLDER, unique_mics[file_idx])
             coords_sel = star_data[star_data["_rlnTomoName"] == unique_mics[file_idx]][
@@ -849,8 +863,9 @@ def show_motion(rln_folder, mic_path, showlegend=True):
             fold_global_motion_x = int(np.max(local_shift['_rlnCoordinateX'].astype(float))/2/np.max(global_shift['_rlnMicrographShiftX']))
             fold_global_motion_y = int(np.max(local_shift['_rlnCoordinateY'].astype(float))/2/np.max(global_shift['_rlnMicrographShiftY']))
             fold_global_motion = np.min([fold_global_motion_x, fold_global_motion_y])
-        except Exception as e:
-            print(e)
+        except Exception:
+            error_info = traceback.format_exc()
+            print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
             fold_global_motion = 1
 
         global_shift['_rlnMicrographShiftX_adjusted'] = global_shift['_rlnMicrographShiftX']*fold_global_motion+center_local_x
@@ -928,8 +943,9 @@ def show_motion(rln_folder, mic_path, showlegend=True):
         # Display the plot
         st.plotly_chart(fig, use_container_width=True)
 
-    except Exception as e:
-        print(f"An error occurred: {e}")
+    except Exception:
+        error_info = traceback.format_exc()
+        print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
         st.write("No data available for plotting.")
 
 
@@ -1209,8 +1225,9 @@ def process_extract_streamlit(node_files, folder):
                 ]
                 line_fig = plot_line_graph(range(micrographs.shape[0]), particles_per_mic)
                 st.plotly_chart(line_fig, use_container_width=True)
-            except Exception as e:
-                print(e)
+            except Exception:
+                error_info = traceback.format_exc()
+                print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
         
         
         if st.checkbox('Show detailed statistics?'):    
@@ -1446,8 +1463,9 @@ def get_classes(path_, model_star_files):
                 fsc_res_per_run.append(
                     star_file["model_class_1"]["_rlnAngstromResolution"]
                 )
-            except Exception as e:
-                print(f'No FSC found in model file {e}')
+            except Exception:
+                error_info = traceback.format_exc()
+                print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
                 pass
 
     # stack all data together
@@ -1970,7 +1988,9 @@ def process_and_display_micrograph(mic_path, coord_path, fom, gaussian_blur_stde
         # Plot and display
         plot_micrograph(micrograph, coords_x, coords_y, img_resize_fac)
 
-    except Exception as e:
+    except Exception:
+        error_info = traceback.format_exc()
+        print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
         st.error(f"Error processing micrograph: {e}")
 
 def process_micrograph(micrograph, img_resize_fac, gaussian_blur_stdev):
@@ -2175,8 +2195,9 @@ def plot_cls3d_stats_streamlit(rln_folder, job_name, nodes):
             if st.checkbox("Show statistics?"):
                 interactive_scatter_plot(os.path.join(rln_folder, nodes[0]))
         
-        except Exception as e:
-            print(e)
+        except Exception:
+            error_info = traceback.format_exc()
+            print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
             st.write("#### No particles.star file found")
 
     elif n_inter == 0 and any("mrc" in node for node in nodes):
@@ -2188,8 +2209,10 @@ def plot_cls3d_stats_streamlit(rln_folder, job_name, nodes):
             plot_combined_classes_streamlit(
                 [os.path.join(rln_folder, nodes[mrc_idx])], [100]
             )
-        except Exception as e:
-            print(e)
+        except Exception:
+            error_info = traceback.format_exc()
+            print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
+
     print(f'{datetime.now()}: plot_cls3d_stats_streamlit done')
     
 
@@ -2763,9 +2786,10 @@ def plot_ctf_refine_streamlit(node_files, FOLDER, job_name):
             else:
                 refine_path = ""
 
-        except Exception as e:
+        except Exception:
+            error_info = traceback.format_exc()
+            print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
             refine_path = ""
-            print(e)
 
         if refine_path != "":
             refine_data = parse_star(os.path.join(FOLDER, refine_path))[
@@ -2989,8 +3013,10 @@ def plot_polish_streamlit(node_files, FOLDER, job_name):
             if st.checkbox("Show random shiny particles?"):
                 show_random_particles_streamlit(os.path.join(FOLDER, node_files[1]), FOLDER)
             
-        except Exception as e:
-            st.error(f"Error loading B-factors data: {e}")
+        except Exception:
+            error_info = traceback.format_exc()
+            print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
+            st.error(f"Error loading B-factors data")
 
     else:
         st.write("No relevant data found for the Polish job.")
@@ -3510,8 +3536,10 @@ def plot_selection_streamlit(node_files, FOLDER, job_name):
 
             fig = plot_micrograph_picks(file, file_idx, coords_sel, coords_rej)
             st.pyplot(fig)
-        except Exception as e:
-            print(f'Selection error: {e}')
+        except Exception:
+            error_info = traceback.format_exc()
+            print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
+            print(f'Selection error')
 
     elif not any("class_averages.star" in element for element in node_files) and any(
         "split" in element for element in node_files
@@ -3676,9 +3704,10 @@ def plot_selection_streamlit(node_files, FOLDER, job_name):
 
                 fig = plot_tomogram_picks(file, file_idx, coords_sel, coords_rej)
                 st.plotly_chart(fig)
-        except Exception as e:
+        except Exception:
+            error_info = traceback.format_exc()
+            print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
             st.write('No other files found')
-            print(e)
     
     print(f'{datetime.now()}: plot_select_streamlit done')
     
@@ -4034,30 +4063,34 @@ def plot_individual_live_ctf(data, meta_list, selected_ranges, color_scheme, uni
             c1.write('Last Micrograph')
             try:
                 process_and_display_micrograph(last_mic_path, '', 0, 0.2, FOLDER, 1)
-            except Exception as e:
-                print(e)
+            except Exception:
+                error_info = traceback.format_exc()
+                print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
                 st.write('No Data')
 
         with c2:
             c2.write('Last Powerspectrum')
             try:
                 plot_power_spectrum(FOLDER, last_mic_path)
-            except Exception as e:
-                print(e)
+            except Exception:
+                error_info = traceback.format_exc()
+                print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
                 st.write('No Data')
     
         st.write('Motion model')
         try:
             show_motion(FOLDER, last_mic_path, False)
-        except Exception as e:
-            print(e)
+        except Exception:
+            error_info = traceback.format_exc()
+            print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
             st.write('No Data')
 
         st.write('CTF FIT')
         try:
             plot_CTF_average(FOLDER, last_ctf_file)
-        except Exception as e:
-            print(e)
+        except Exception:
+            error_info = traceback.format_exc()
+            print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
             st.write('No Data')
             
     
@@ -4810,7 +4843,9 @@ if mode == "View Jobs":
             try:
                 try:
                     process_types = list(df["_rlnPipeLineProcessTypeLabel"].unique())
-                except:
+                except Exception:
+                    error_info = traceback.format_exc()
+                    print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
                     st.error('This folder contains Relion 3 process types. Relion 3 metadata handling is not supported. Try updating to newer Relion version')
                     st.stop()
                     
@@ -4866,10 +4901,25 @@ if mode == "View Jobs":
                     "_rlnPipeLineProcessName"
                 ].tolist()
                 
+                # List to store the required values
+                jobs_dict = {}
+
+                # Using dict to store aliases if present, otherwise job name will show, but also store job names for downstream processing
+                # Iterating through each row of the DataFrame
+                for _, row in df[df["_rlnPipeLineProcessTypeLabel"] == selected_process].iterrows():
+                    # Use _rlnPipeLineProcessAlias if not None, otherwise use _rlnPipeLineProcessName
+                    value = row["_rlnPipeLineProcessAlias"] if row["_rlnPipeLineProcessAlias"] != 'None' else row["_rlnPipeLineProcessName"]
+                    jobs_dict[value] = row["_rlnPipeLineProcessName"]
+                
+                jobs = list(jobs_dict.keys())
+                
                 # Job selection
                 if jobs:
                     st.sidebar.title(f"{selected_process} Jobs")
                     selected_job = st.sidebar.radio("Choose a job:", jobs, index=len(jobs)-1)
+                    
+                    # Get the job name instead of the alias so no more changes are required
+                    selected_job = jobs_dict[selected_job]
 
                     display_job_info(
                         selected_job, FOLDER, pipeline_processes, pipeline_star
@@ -4879,9 +4929,9 @@ if mode == "View Jobs":
                     st.sidebar.write("No jobs available for this process type.")
                     pass
             
-            except Exception as e:
-                print(e)
-                st.error(f"No jobs available for this process type. {e}")
+            except Exception:
+                error_info = traceback.format_exc()
+                print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
 
         else:
             st.error(f"No default_pipeline.star found in the directory.")
@@ -4971,7 +5021,9 @@ elif mode == "Live processing":
             pipeliner_path = os.path.join(job_folder_path, "default_pipeline.star")
             pipeline_star = parse_star(pipeliner_path)
 
-        except:
+        except Exception:
+            error_info = traceback.format_exc()
+            print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
             pipeline_star = None
 
         if pipeline_star:
@@ -4999,20 +5051,23 @@ elif mode == "Live processing":
                     jobs_to_monitor[meta] = jobs
             try:
                 import_job_select = st.sidebar.selectbox('Select Import Job:', jobs_to_monitor['Import']['_rlnPipeLineProcessName'])
-            except Exception as e:
-                print(e)
+            except Exception:
+                error_info = traceback.format_exc()
+                print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
                 pass
             
             try:
                 motionCorr_job_select = st.sidebar.selectbox('Select MotionCorr Job:', jobs_to_monitor['MotionCorr']['_rlnPipeLineProcessName'])
-            except Exception as e:
-                print(e)
+            except Exception:
+                error_info = traceback.format_exc()
+                print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
                 pass
             
             try:
                 ctffind_job_select = st.sidebar.selectbox('Select Ctffind Job:', jobs_to_monitor['CtfFind']['_rlnPipeLineProcessName'])
-            except Exception as e:
-                print(e)
+            except Exception:
+                error_info = traceback.format_exc()
+                print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
                 pass
             
             
@@ -5041,10 +5096,11 @@ elif mode == "Live processing":
                         continue_with_live = False
                     
                     pass
-                except Exception as e:
+                except Exception:
+                    error_info = traceback.format_exc()
+                    print(f"{datetime.now()}: An unexpected error occurred:\n{error_info}")
                     st.write('Necessery folders not found')
                     continue_with_live=False
-                    print(e)
             
             if continue_with_live:
                 col1, col2 = st.sidebar.columns(2)
