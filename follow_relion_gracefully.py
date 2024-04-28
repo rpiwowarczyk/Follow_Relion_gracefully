@@ -2088,8 +2088,9 @@ def plot_cls3d_stats_streamlit(rln_folder, job_name, nodes):
     model_files = glob.glob(os.path.join(path_data, "*model.star"))
     model_files.sort(key=os.path.getmtime)
     n_inter = len(model_files)
-
-
+    data_files = glob.glob(os.path.join(path_data, "*data.star"))
+    data_files.sort(reverse=True)
+    
     if n_inter != 0:
         class_paths, n_classes_, iter_, class_dist_, class_res_, fsc_res, fsc = get_classes(
             path_data, model_files
@@ -2182,7 +2183,9 @@ def plot_cls3d_stats_streamlit(rln_folder, job_name, nodes):
         # Plot Angular distribution
         try:
             rot, tilt, psi = get_angles(path_data)
-            star_data = parse_star(os.path.join(rln_folder, nodes[0]))
+            print(data_files[-1])
+            selected_data_file = st.selectbox('Plot iteration:', data_files)
+            star_data = parse_star(selected_data_file)
             
             if n_classes_ > 1:
                 star_data = star_data["particles"]
